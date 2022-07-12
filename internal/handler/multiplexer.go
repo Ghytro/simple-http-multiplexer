@@ -65,6 +65,7 @@ func makeExternalServiceResponse(resp *http.Response) (ExternalServiceReponse, e
 	if _, err := io.Copy(base64Encoder, resp.Body); err != nil {
 		return ExternalServiceReponse{}, err
 	}
+	base64Encoder.Close()
 	esResponse.Base64Payload = base64ResponseWriter.String()
 	return esResponse, nil
 }
@@ -72,7 +73,11 @@ func makeExternalServiceResponse(resp *http.Response) (ExternalServiceReponse, e
 func MuxHandler(w http.ResponseWriter, r *http.Request) {
 	req := &MuxHandleRequest{}
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
-		handleUnknownError(w, err)
+		http.Error(
+			w,
+			"Expected json encoded data",
+			http.StatusBadRequest,
+		)
 		return
 	}
 	if len(req.Urls) > config.MaxUrlPerRequest {
