@@ -114,7 +114,7 @@ func MuxHandler(w http.ResponseWriter, r *http.Request) {
 
 	// no need in wg to wait for goroutines, channels do the job
 	for i := 0; i < len(req.Urls); i += config.MaxOutcomingRequestsPerRequest {
-		for j := 0; j < config.MaxOutcomingRequestsPerRequest; j++ {
+		for j := 0; i+j < len(req.Urls); j++ {
 			go performReq(req.Urls[i+j])
 		}
 		for j := 0; j < config.MaxOutcomingRequestsPerRequest; j++ {

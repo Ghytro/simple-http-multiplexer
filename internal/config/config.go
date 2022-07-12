@@ -8,7 +8,6 @@ import (
 )
 
 var (
-	Port,
 	MaxIncomingConnections,
 	MaxUrlPerRequest,
 	MaxOutcomingRequestsPerRequest int
@@ -34,7 +33,6 @@ func getIntConfigKey(key string) int {
 }
 
 func init() {
-	Port = getIntConfigKey("PORT")
 	MaxIncomingConnections = getIntConfigKey("MAX_INCOMING_CONNS")
 	MaxUrlPerRequest = getIntConfigKey("MAX_URL_PER_REQUEST")
 	MaxOutcomingRequestsPerRequest = getIntConfigKey("MAX_OUTCOMING_REQUESTS_PER_REQUEST")
