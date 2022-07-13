@@ -60,6 +60,36 @@ func makeExternalServiceResponse(resp *http.Response) (ExternalServiceReponse, e
 	return esResponse, nil
 }
 
+type httpError struct {
+	err                 error
+	returningStatusCode int
+	url                 string
+}
+
+func newHttpError(err error, statusCode int, url string) *httpError {
+	return &httpError{
+		err:                 err,
+		returningStatusCode: statusCode,
+		url:                 url,
+	}
+}
+
+func (e httpError) Error() string {
+	return fmt.Sprintf("an error occured while accessing url %s: %s", e.url, e.err)
+}
+
+func (e httpError) Err() error {
+	return e.err
+}
+
+func (e httpError) Url() string {
+	return e.url
+}
+
+func (e httpError) ReturningStatusCode() int {
+	return e.returningStatusCode
+}
+
 func performRequests(urls []string, result chan MuxHandleResponse, chanErr chan error) {
 	client := newHttpClient()
 	responses := make(chan *http.Response)
@@ -69,7 +99,13 @@ func performRequests(urls []string, result chan MuxHandleResponse, chanErr chan 
 	performReq := func(url string) {
 		resp, err := client.Post(url, "", strings.NewReader(""))
 		if err != nil {
-			errs <- fmt.Errorf("error accessing url %s: %s", url, err)
+			errStatusCode := http.StatusInternalServerError
+			errMessage := err.Error()
+			if strings.Contains(err.Error(), "context deadline exceeded") {
+				errStatusCode = http.StatusRequestTimeout
+				errMessage = "timeout for request to url"
+			}
+			errs <- newHttpError(err, errStatusCode, errMessage)
 			responses <- nil
 			return
 		}
@@ -142,6 +178,14 @@ func MuxHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(muxResponse)
 	case err := <-errs:
+		if httpErr, ok := err.(httpError); ok {
+			http.Error(
+				w,
+				err.Error(),
+				httpErr.returningStatusCode,
+			)
+			break
+		}
 		http.Error(
 			w,
 			err.Error(),
@@ -153,5 +197,7 @@ func MuxHandler(w http.ResponseWriter, r *http.Request) {
 			"Request timeout",
 			http.StatusRequestTimeout,
 		)
+	case <-r.Context().Done():
+		break
 	}
 }

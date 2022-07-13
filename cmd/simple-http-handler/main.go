@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/Ghytro/simple-http-multiplexer/internal/handler"
+	"github.com/Ghytro/simple-http-multiplexer/internal/server"
 )
 
 func main() {
@@ -11,5 +12,5 @@ func main() {
 	limiter := handler.NewMuxLimiter(mux)
 	mux.HandleFunc("/api/mux", handler.MuxHandler)
 
-	http.ListenAndServe(":8080", limiter)
+	server.NewGracefulShutdownServer(":8080", limiter).Listen()
 }
