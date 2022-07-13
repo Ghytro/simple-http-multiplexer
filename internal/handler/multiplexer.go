@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -37,7 +38,6 @@ func isIncorrectUrl(u string) bool {
 
 func newHttpClient() *http.Client {
 	return &http.Client{
-		Timeout: time.Second * config.UrlRequestTimeout,
 		Transport: &http.Transport{
 			MaxIdleConns: config.MaxOutcomingRequestsPerRequest,
 		},
@@ -61,25 +61,21 @@ func makeExternalServiceResponse(resp *http.Response) (ExternalServiceReponse, e
 }
 
 type httpError struct {
-	err                 error
+	errorMessage        string
 	returningStatusCode int
 	url                 string
 }
 
-func newHttpError(err error, statusCode int, url string) *httpError {
+func newHttpError(errMessage string, statusCode int, url string) *httpError {
 	return &httpError{
-		err:                 err,
+		errorMessage:        errMessage,
 		returningStatusCode: statusCode,
 		url:                 url,
 	}
 }
 
 func (e httpError) Error() string {
-	return fmt.Sprintf("an error occured while accessing url %s: %s", e.url, e.err)
-}
-
-func (e httpError) Err() error {
-	return e.err
+	return fmt.Sprintf("an error occured while accessing url %q: %s", e.url, e.errorMessage)
 }
 
 func (e httpError) Url() string {
@@ -90,22 +86,33 @@ func (e httpError) ReturningStatusCode() int {
 	return e.returningStatusCode
 }
 
-func performRequests(urls []string, result chan MuxHandleResponse, chanErr chan error) {
+func performRequests(reqCtx context.Context, urls []string, result chan MuxHandleResponse, chanErr chan error) {
 	client := newHttpClient()
 	responses := make(chan *http.Response)
 	// avoid goroutine leaks with buffered channels for error handling
 	errs := make(chan error, config.MaxOutcomingRequestsPerRequest)
 
 	performReq := func(url string) {
-		resp, err := client.Post(url, "", strings.NewReader(""))
+		req, err := http.NewRequest("POST", url, strings.NewReader(""))
 		if err != nil {
-			errStatusCode := http.StatusInternalServerError
-			errMessage := err.Error()
+			errs <- err
+			return
+		}
+		ctx, cancel := context.WithTimeout(
+			reqCtx,
+			time.Second*config.UrlRequestTimeout,
+		)
+		defer cancel()
+		req = req.WithContext(ctx)
+		resp, err := client.Do(req)
+		if err != nil {
 			if strings.Contains(err.Error(), "context deadline exceeded") {
-				errStatusCode = http.StatusRequestTimeout
-				errMessage = "timeout for request to url"
+				errStatusCode := http.StatusRequestTimeout
+				errMessage := "timeout for request to url"
+				errs <- newHttpError(errMessage, errStatusCode, url)
+			} else {
+				errs <- err
 			}
-			errs <- newHttpError(err, errStatusCode, errMessage)
 			responses <- nil
 			return
 		}
@@ -116,7 +123,7 @@ func performRequests(urls []string, result chan MuxHandleResponse, chanErr chan 
 
 	// no need in wg to wait for goroutines, channels do the job
 	for i := 0; i < len(urls); i += config.MaxOutcomingRequestsPerRequest {
-		for j := 0; i+j < len(urls); j++ {
+		for j := 0; i+j < len(urls) && j < config.MaxOutcomingRequestsPerRequest; j++ {
 			go performReq(urls[i+j])
 		}
 		// handle all the errors first
@@ -172,7 +179,7 @@ func MuxHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	chanMuxResponse := make(chan MuxHandleResponse, 1)
 	errs := make(chan error, 1)
-	go performRequests(req.Urls, chanMuxResponse, errs)
+	go performRequests(r.Context(), req.Urls, chanMuxResponse, errs)
 	select {
 	case muxResponse := <-chanMuxResponse:
 		w.Header().Set("Content-Type", "application/json")

@@ -1,7 +1,7 @@
 FROM golang:1.18.3-alpine as build
 WORKDIR /app
 COPY . .
-RUN cd cmd/simple-http-handler && go build -o app
+RUN cd cmd/simple-http-multiplexer && go build -o app
 
 FROM build as test
 RUN apk add build-base
@@ -13,6 +13,6 @@ ENV SIMPLE_HTTP_MUX_MAX_INCOMING_CONNS=100 \
 RUN go test ./test/
 
 FROM alpine as prod
-COPY --from=build /app/cmd/simple-http-handler/app ./app
+COPY --from=build /app/cmd/simple-http-multiplexer/app ./app
 EXPOSE 8080
 ENTRYPOINT ["/app"]

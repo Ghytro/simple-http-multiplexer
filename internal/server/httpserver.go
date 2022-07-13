@@ -40,7 +40,7 @@ func (s *GracefulShutdownedServer) Listen() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 	if err := s.serv.Shutdown(ctx); err != nil {
-		log.Fatalf("Graceful shutdown failed: %+v", err)
+		log.Fatalf("Graceful shutdown failed: %+v; forcing shutdown", err)
 	}
-	log.Println("Gracefully shutted down")
+	log.Println("Server shutted down")
 }

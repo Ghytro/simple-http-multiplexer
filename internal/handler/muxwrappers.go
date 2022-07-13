@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/Ghytro/simple-http-multiplexer/internal/config"
@@ -25,7 +26,8 @@ func (ml *MuxLimiter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ml.connLimiter.Disconnected()
 		return
 	}
-	http.Error(w, "", http.StatusTooManyRequests)
+	w.Header().Add("Retry-After", fmt.Sprint(int(config.RequestHandleTimeout)/2))
+	w.WriteHeader(http.StatusTooManyRequests)
 }
 
 type MuxErrorHandler struct {
