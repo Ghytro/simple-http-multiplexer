@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,15 +28,6 @@ type ExternalServiceReponse struct {
 	HttpStatusCode int    `json:"http_status_code"`
 	Base64Payload  string `json:"base64_payload"`
 	ContentType    string `json:"content_type"`
-}
-
-func handleUnknownError(w http.ResponseWriter, err error) {
-	log.Println(err)
-	http.Error(
-		w,
-		"Unknown error occured, try again later",
-		http.StatusInternalServerError,
-	)
 }
 
 func isIncorrectUrl(u string) bool {
@@ -70,6 +60,50 @@ func makeExternalServiceResponse(resp *http.Response) (ExternalServiceReponse, e
 	return esResponse, nil
 }
 
+func performRequests(urls []string, result chan MuxHandleResponse, chanErr chan error) {
+	client := newHttpClient()
+	responses := make(chan *http.Response)
+	// avoid goroutine leaks with buffered channels for error handling
+	errs := make(chan error, config.MaxOutcomingRequestsPerRequest)
+
+	performReq := func(url string) {
+		resp, err := client.Post(url, "", strings.NewReader(""))
+		if err != nil {
+			errs <- fmt.Errorf("error accessing url %s: %s", url, err)
+			responses <- nil
+			return
+		}
+		errs <- nil
+		responses <- resp
+	}
+	esResponses := make([]ExternalServiceReponse, 0, len(urls))
+
+	// no need in wg to wait for goroutines, channels do the job
+	for i := 0; i < len(urls); i += config.MaxOutcomingRequestsPerRequest {
+		for j := 0; i+j < len(urls); j++ {
+			go performReq(urls[i+j])
+		}
+		// handle all the errors first
+		for j := 0; j < config.MaxOutcomingRequestsPerRequest; j++ {
+			err := <-errs
+			if err != nil {
+				chanErr <- err
+				return
+			}
+		}
+		for j := 0; j < config.MaxOutcomingRequestsPerRequest; j++ {
+			resp := <-responses
+			esResponse, err := makeExternalServiceResponse(resp)
+			if err != nil {
+				chanErr <- err
+				return
+			}
+			esResponses = append(esResponses, esResponse)
+		}
+	}
+	result <- MuxHandleResponse{esResponses}
+}
+
 func MuxHandler(w http.ResponseWriter, r *http.Request) {
 	req := &MuxHandleRequest{}
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
@@ -100,52 +134,24 @@ func MuxHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-
-	client := newHttpClient()
-	errs := make(chan error)
-	responses := make(chan *http.Response)
-
-	performReq := func(url string) {
-		resp, err := client.Post(url, "", strings.NewReader(""))
-		if err != nil {
-			errs <- fmt.Errorf("error accessing url %s: %s", url, err)
-			responses <- nil
-			return
-		}
-		responses <- resp
-		errs <- nil
+	chanMuxResponse := make(chan MuxHandleResponse, 1)
+	errs := make(chan error, 1)
+	go performRequests(req.Urls, chanMuxResponse, errs)
+	select {
+	case muxResponse := <-chanMuxResponse:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(muxResponse)
+	case err := <-errs:
+		http.Error(
+			w,
+			err.Error(),
+			http.StatusInternalServerError,
+		)
+	case <-time.After(time.Second * config.RequestHandleTimeout):
+		http.Error(
+			w,
+			"Request timeout",
+			http.StatusRequestTimeout,
+		)
 	}
-	esResponses := make([]ExternalServiceReponse, 0, len(req.Urls))
-
-	// no need in wg to wait for goroutines, channels do the job
-	for i := 0; i < len(req.Urls); i += config.MaxOutcomingRequestsPerRequest {
-		for j := 0; i+j < len(req.Urls); j++ {
-			go performReq(req.Urls[i+j])
-		}
-		for j := 0; j < config.MaxOutcomingRequestsPerRequest; j++ {
-			resp := <-responses
-			// if response was nil, the error occured
-			// so the channel is read until getting non nil error
-			if resp == nil {
-				err := <-errs
-				for err == nil {
-					err = <-errs
-				}
-				http.Error(
-					w,
-					err.Error(),
-					http.StatusInternalServerError,
-				)
-				return
-			}
-			esResponse, err := makeExternalServiceResponse(resp)
-			if err != nil {
-				handleUnknownError(w, err)
-				return
-			}
-			esResponses = append(esResponses, esResponse)
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(MuxHandleResponse{esResponses})
 }

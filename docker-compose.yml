@@ -1,7 +1,10 @@
 version: '3'
 services:
   simple-http-mux:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
     container_name: simple-http-mux
     ports:
       - "8080:8080"
