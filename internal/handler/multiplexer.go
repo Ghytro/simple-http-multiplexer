@@ -152,7 +152,7 @@ func MuxHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		http.Error(
 			w,
-			"Expected json encoded data",
+			"Unable to parse json from request body",
 			http.StatusBadRequest,
 		)
 		return

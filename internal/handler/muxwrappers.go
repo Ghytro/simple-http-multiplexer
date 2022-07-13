@@ -48,5 +48,6 @@ func (eh *MuxErrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
 	eh.mux.ServeHTTP(w, r)
 }
