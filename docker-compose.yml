@@ -1,0 +1,16 @@
+version: '3'
+services:
+  simple-http-mux:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    container_name: simple-http-mux
+    ports:
+      - "8080:8080"
+    environment:
+      - SIMPLE_HTTP_MUX_MAX_INCOMING_CONNS=100
+      - SIMPLE_HTTP_MUX_MAX_URL_PER_REQUEST=20
+      - SIMPLE_HTTP_MUX_MAX_OUTCOMING_REQUESTS_PER_REQUEST=4
+      - SIMPLE_HTTP_MUX_URL_REQUEST_TIMEOUT=1
+      - SIMPLE_HTTP_MUX_REQUEST_HANDLE_TIMEOUT=10
