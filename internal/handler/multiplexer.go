@@ -92,20 +92,17 @@ func performRequests(reqCtx context.Context, urls []string, result chan MuxHandl
 	// avoid goroutine leaks with buffered channels for error handling
 	errs := make(chan error, config.MaxOutcomingRequestsPerRequest)
 
-	performReq := func(url string) {
+	performReq := func(url string, ctx context.Context, cancel context.CancelFunc) {
 		req, err := http.NewRequest("POST", url, strings.NewReader(""))
 		if err != nil {
+			cancel()
 			errs <- err
 			return
 		}
-		ctx, cancel := context.WithTimeout(
-			reqCtx,
-			time.Second*config.UrlRequestTimeout,
-		)
-		defer cancel()
 		req = req.WithContext(ctx)
 		resp, err := client.Do(req)
 		if err != nil {
+			cancel()
 			if strings.Contains(err.Error(), "context deadline exceeded") {
 				errStatusCode := http.StatusRequestTimeout
 				errMessage := "timeout for request to url"
@@ -123,8 +120,10 @@ func performRequests(reqCtx context.Context, urls []string, result chan MuxHandl
 
 	// no need in wg to wait for goroutines, channels do the job
 	for i := 0; i < len(urls); i += config.MaxOutcomingRequestsPerRequest {
+		ctx, cancel := context.WithTimeout(reqCtx, time.Second*config.UrlRequestTimeout)
+		defer cancel()
 		for j := 0; i+j < len(urls) && j < config.MaxOutcomingRequestsPerRequest; j++ {
-			go performReq(urls[i+j])
+			go performReq(urls[i+j], ctx, cancel)
 		}
 		// handle all the errors first
 		for j := 0; j < config.MaxOutcomingRequestsPerRequest; j++ {
